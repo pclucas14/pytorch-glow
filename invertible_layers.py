@@ -71,15 +71,33 @@ class Reverse(Shuffle):
 '''
 Invertible 1x1 convolution
 '''
-class Invertible1x1Conv(Layer):
-    def __init__(self):
-        raise NotImplementedError
+class Invertible1x1Conv(Layer, nn.Conv2d):
+    def __init__(self, num_channels):
+        nn.Conv2d.__init__(self, num_channels, num_channels, 1, bias=False)
+        self.num_channels = num_channels
+
+    def reset_parameters(self):
+        # initialization done with rotation matrix
+        w_init = np.linalg.qr(np.random.randn((self.num_channels, self.num_channels)))[0]
+        w_init = torch.from_numpy(w_init.astype('float32'))
+        w_init = w_init.cuda()
+        w_init = w_init.unsqueeze(-1).unsqueeze(-1)
+        self.weight.copy_(w_init)
 
     def forward_and_jacobian(self, x, sum_log_det_jacobian):
-        pass
+        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1)
+        sum_log_det_jacobian += dlogdet
+        output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
+                    self.dilation, self.groups)
+        return output, sum_log_det_jacobian
 
     def reverse_and_jacobian(self, x, sum_log_det_jacobian):
-        pass
+        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1)
+        sum_log_det_jacobian -= dlogdet
+        weight_inv = torch.inverse(self.weight.squeeze()).unsqueeze(-1).unsqueeze(-1)
+        output = F.conv2d(x, weight_inv, self.bias, self.stride, self.padding, \
+                    self.dilation, self.groups)
+        return output, sum_log_det_jacobian
 
 
 '''
