@@ -15,6 +15,22 @@ def flatten_sum(logps):
         logps = logps.sum(dim=-1)
     return logps
 
+def preprocess(x, args, add_noise=True):
+    x = x.float()
+    if args.n_bits_x < 8: 
+        x = torch.floor(x / 2 ** (8 - args.n_bits_x))
+    
+    x = x / args.n_bins - .5
+    if add_noise: 
+        x += torch.FloatTensor(x.size()).uniform_(0., 1./args.n_bins)
+
+    return x
+
+def postprocess(x, args):
+    x = (x + .5) * args.n_bins
+    x = np.floor(x) * (256./args.n_bins)
+    return np.clip(x, 0., 255).astype('uint8')
+
 '''
 Distributions
 '''
@@ -26,19 +42,20 @@ def gaussian_diag(mean, logsd):
     class o(object):
         pass
 
-        @property
-        def eps(self):
-            return torch.cuda.FloatTensor(mean.size()).normal_()
-            
+        def logps(x):
+            return  -0.5 * (torch.cuda.FloatTensor([np.log(2 * np.pi).astype('float32')]) + 2. * logsd + (x - mean) ** 2 / torch.exp(2. * logsd))
+
+        def sample():
+            eps = torch.cuda.FloatTensor(mean.size()).normal_(0,1)
+            return mean + torch.exp(logsd) * eps
+
     o.mean    = mean
     o.logsd   = logsd
     # o.eps   = tf.random_normal(tf.shape(mean))
-    o.sample  = mean + torch.exp(logsd) * o.eps
-    o.sample2 = lambda eps: mean + torch.exp(logsd) * eps
     o.logp    = lambda x: flatten_sum(o.logps(x))
     o.get_eps = lambda x: (x - mean) / tf.exp(logsd)
-    o.logps   = lambda x: -0.5 * (np.log(2 * np.pi).astype('float32') \ 
-                          + 2. * logsd + (x - mean) ** 2 / torch.exp(2. * logsd))
+    # o.logps   = lambda x: -0.5 * (np.log(2 * np.pi).astype('float32') \
+    #                      + 2. * logsd + (x - mean) ** 2 / torch.exp(2. * logsd))
     return o
 
 

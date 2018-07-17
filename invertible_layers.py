@@ -143,9 +143,9 @@ class Squeeze(Layer):
 
         # done as in GLOW repository
         x = x.transpose(3, 1).contiguous()
-        x = x.view(-1, h, w, int(c / self.factor ** 2), self.factor, self.factor)
+        x = x.reshape(-1, h, w, int(c / self.factor ** 2), self.factor, self.factor)
         x = x.permute(0, 1, 4, 2, 5, 3)
-        x = x.view(-1, int(h * w), int(w * self.factor), int(c / self.factor ** 2))
+        x = x.reshape(-1, int(h * self.factor), int(w * self.factor), int(c / self.factor ** 2))
         return x.transpose(3, 1).contiguous()
     
     def forward_and_jacobian(self, x, objective):
@@ -192,18 +192,19 @@ class Split(Squeeze):
         return z1, objective
 
     def reverse_and_jacobian(self, x, objective):
-        z1 = unsqueeze_bchw(x)
-        pz = split2d_prior(z1)
-        z2 = pz.sample
+        z1 = self.unsqueeze_bchw(x)
+        pz = self.split2d_prior(z1)
+        z2 = pz.sample()
         z = torch.cat([z1, z2], dim=1)
         # TODO: is this correct ?
-        objective -= pz.logp(z2)
+        objective -= pz.logp(z2).sum()
         return z, objective
 
 # Gaussian Prior that's compatible with the Layer framework
 class GaussianPrior(Layer):
     def __init__(self, input_shape, args):
         super(GaussianPrior, self).__init__()
+        self.input_shape = input_shape
         if args.learntop: 
             self.conv = Conv2dZeroInit(input_shape[1], 2 * input_shape[1], 3, padding=(3 - 1) // 2)
         else: 
@@ -222,18 +223,19 @@ class GaussianPrior(Layer):
 
         return None, objective
 
-    def backward_and_jacobian(self, x, objective):
+    def reverse_and_jacobian(self, x, objective):
         assert x is None
         objective = objective or 0.
-        mean_and_logsd = torch.cat(*[torch.zeros_like(x) for _ in range(2)], dim=1)
-        
+        bs, c, h, w = self.input_shape
+        mean_and_logsd = torch.cuda.FloatTensor(bs, 2 * c, h, w).fill_(0.)
+
         if self.conv: 
             mean_and_logsd = self.conv(mean_and_logsd)
 
         mean, logsd = torch.chunk(mean_and_logsd, 2, dim=1)
         pz = gaussian_diag(mean, logsd)
 
-        return pz.sample, objective
+        return pz.sample(), objective
          
 ###############################################################################
 
@@ -339,7 +341,7 @@ class BatchNorm(Layer, _BatchNorm):
 
         return output, objective
 
-    def reverse(self, input, objective):
+    def reverse_and_jacobian(self, input, objective):
         assert not self.training, 'reverse pass should only be used for sampling'
 
         # 1) Resize the input ot (B, C, -1)
@@ -428,4 +430,9 @@ class Codec(LayerList):
         
         layers += [GaussianPrior(input_shape, args)]
         self.layers = nn.ModuleList(layers)
+        self.output_shape = input_shape
+
+    def sample(self):
+        sample, _ = self.reverse_and_jacobian(None, 0.)
+        return sample
     
