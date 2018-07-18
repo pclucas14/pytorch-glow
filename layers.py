@@ -29,11 +29,11 @@ class NN(nn.Module):
     def __init__(self, channels_in, channels_out=None):
         super(NN, self).__init__()
         channels_out = channels_out or channels_in
-        print(channels_in, channels_out)
+        #wn = lambda x: x
         self.main = nn.Sequential(*[
-            nn.Conv2d(channels_in, channels_in, 3, stride=1, padding=(3 - 1) // 2),
+            wn(nn.Conv2d(channels_in, channels_in, 3, stride=1, padding=(3 - 1) // 2)),
             nn.ReLU(True), 
-            nn.Conv2d(channels_in, channels_in, 1, stride=1, padding=(1 - 1) // 2),
+            wn(nn.Conv2d(channels_in, channels_in, 1, stride=1, padding=(1 - 1) // 2)),
             nn.ReLU(True), 
             Conv2dZeroInit(channels_in, channels_out, 3, stride=1, padding=(3 - 1) // 2)])
 
