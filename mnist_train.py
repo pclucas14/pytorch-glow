@@ -29,7 +29,9 @@ args.n_bins = 2 ** args.n_bits_x
 tf = transforms.Compose([transforms.Resize((32, 32)), 
                          transforms.ToTensor(), 
                          lambda x: (x * 256.).byte(), 
-                         lambda x: preprocess(x, args)])
+                         lambda x: preprocess(x, args, add_noise=False), 
+                         lambda x: torch.cat([x, x, x], dim=0), 
+                         lambda x: x + torch.zeros_like(x).uniform_(0., 1./args.n_bins)])
 
 train_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, download=True, 
                     train=True, transform=tf), batch_size=args.batch_size, 
@@ -38,14 +40,14 @@ train_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, downloa
 test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, 
                 transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=4)
 
-model = Glow((args.batch_size, 1, 32, 32), args)
+model = Glow((args.batch_size, 3, 32, 32), args)
 model = model.cuda()
 print(model)
 print("number of model parameters:", sum([np.prod(p.size()) for p in model.parameters()]))
 optim = optim.Adam(model.parameters(), lr=1e-3)
 
 # data dependant init
-if args.norm == 'actnorm': 
+if args.norm == 'actnorm' or True: 
     init_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, download=True, 
                     train=True, transform=tf), batch_size=512, shuffle=True, num_workers=1)
     
@@ -64,7 +66,7 @@ for epoch in range(500):
     avg_train_bits_x = 0.
     for i, (img, label) in enumerate(train_loader): 
         img = img.cuda()
-
+        
         # log_det_jacobian cost (and some prior from Split OP)
         z, objective = model.forward_and_jacobian(img, 0.)
         
@@ -79,7 +81,9 @@ for epoch in range(500):
         nobj.backward()
         optim.step()
 
-    print('avg train bits per pixel {:.4f}'.format(avg_train_bits_x.item() / i))
+        if (i+1) % 2 == 0: 
+            print('avg train bits per pixel {:.4f}'.format(avg_train_bits_x.item() / 2))
+            avg_train_bits_x = 0.
     
     model.eval()
     avg_test_bits_x = 0.
@@ -99,8 +103,9 @@ for epoch in range(500):
 
         print('avg test bits per pixel {:.4f}'.format(avg_test_bits_x.item() / i))
         
-    sample = model.sample().cpu().data.numpy()[:10]
-    sample = sample.reshape(10 * sample.shape[-1], sample.shape[-2])
+    sample = model.sample()
+    sample = sample.transpose(1, 3).cpu().data.numpy()[:10]
+    sample = sample.reshape(10 * sample.shape[1], sample.shape[2], sample.shape[3])
     print('image  max %f, sample min %f'   % (img.max().item(), img.min().item()))
     print('sample max %f, sample min %f\n' % (sample.max().item(), sample.min().item()))
     sample = postprocess(sample, args)

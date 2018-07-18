@@ -46,7 +46,7 @@ def gaussian_diag(mean, logsd):
             return  -0.5 * (torch.cuda.FloatTensor([np.log(2 * np.pi).astype('float32')]) + 2. * logsd + (x - mean) ** 2 / torch.exp(2. * logsd))
 
         def sample():
-            eps = torch.cuda.FloatTensor(mean.size()).normal_(0,1)
+            eps = torch.cuda.FloatTensor(mean.size()).normal_(0,1) * 0.7
             return mean + torch.exp(logsd) * eps
 
     o.mean    = mean

@@ -42,7 +42,7 @@ class LinearZeroInit(nn.Linear):
 Shallow NN used for skip connection. Labelled `f` in the original repo.
 '''
 class NN(nn.Module):
-    def __init__(self, channels_in, channels_out=None, conv_op=Conv2dActNorm):
+    def __init__(self, channels_in, channels_out=None, conv_op=nn.Conv2d): #Conv2dActNorm):
         super(NN, self).__init__()
         channels_out = channels_out or channels_in
         self.main = nn.Sequential(*[

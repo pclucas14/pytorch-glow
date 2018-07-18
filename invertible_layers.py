@@ -95,14 +95,14 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         self.weight.data.copy_(w_init)
 
     def forward_and_jacobian(self, x, objective):
-        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1)
+        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) * x.size(0)
         objective += dlogdet
         output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
                     self.dilation, self.groups)
         return output, objective
 
     def reverse_and_jacobian(self, x, objective):
-        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1)
+        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) * x.size(0)
         objective -= dlogdet
         weight_inv = torch.inverse(self.weight.squeeze()).unsqueeze(-1).unsqueeze(-1)
         output = F.conv2d(x, weight_inv, self.bias, self.stride, self.padding, \
@@ -275,8 +275,7 @@ class AffineCoupling(Layer):
         z2 += shift
         z2 *= scale
         # TODO: check if should keep batch axis
-        try: objective += torch.sum(torch.log(scale))
-        except: pdb.set_trace()
+        objective += torch.sum(torch.log(scale))
 
         return torch.cat([z1, z2], dim=1), objective
 
@@ -337,7 +336,7 @@ class ActNorm(Layer):
         logs = self.logs * self.logscale_factor
         b = self.b
         output = (input + b) * torch.exp(logs)
-        dlogdet = torch.sum(logs) * input.shape[-1] # c x h  
+        dlogdet = torch.sum(logs) * input.size(0) * input.size(-1) # b x c x h  
 
         return output.view(input_shape), objective + dlogdet
 
@@ -348,7 +347,7 @@ class ActNorm(Layer):
         logs = self.logs * self.logscale_factor
         b = self.b
         output = input / torch.exp(logs) - b
-        dlogdet = torch.sum(logs) * input.shape[-1] # c x h  
+        dlogdet = torch.sum(logs) * input.size(0) * input.size(1) # b x c x h  
 
         return output.view(input_shape), objective - dlogdet
 
@@ -391,7 +390,7 @@ class BatchNorm(Layer, _BatchNorm):
             self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean.data
             self.running_var  = (1 - self.momentum) * self.running_var  + self.momentum * unbias_var.data
 
-        log_det_jacobian = torch.log(torch.abs(inv_std)) * sum_size
+        log_det_jacobian = torch.log(inv_std) * sum_size
         objective += log_det_jacobian.sum()
 
         return output.view(input_shape), objective
@@ -425,7 +424,7 @@ class BatchNorm(Layer, _BatchNorm):
         check_np = output.cpu().data.numpy()
         if np.isnan(check_np).any() or np.isinf(check_np).any(): pdb.set_trace()
 
-        log_det_jacobian = torch.log(torch.abs(inv_std)) * sum_size
+        log_det_jacobian = torch.log(inv_std) * sum_size
         objective -= log_det_jacobian.sum()
 
         return output.view(input_shape), objective

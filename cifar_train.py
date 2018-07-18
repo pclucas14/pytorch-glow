@@ -45,9 +45,8 @@ optim = optim.Adam(model.parameters(), lr=5e-4)
 
 # data dependant init
 if args.norm == 'actnorm': 
-    init_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, download=True, 
-                    train=True, transform=tf), batch_size=500, 
-                        shuffle=True, num_workers=4)
+    init_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
+        download=True, transform=tf), batch_size=512, shuffle=True, num_workers=1)
     
     model.eval()
     with torch.no_grad():
@@ -96,7 +95,7 @@ for epoch in range(500):
             nobj = - objective / img.shape[0]
             avg_test_bits_x += nobj / (np.log(2.) * np.prod(img.shape[1:]))
 
-        print('avg test bits per pixel {:.4f}'.format(avg_train_bits_x.item() / i))
+        print('avg test bits per pixel {:.4f}'.format(avg_test_bits_x.item() / i))
 
     sample = model.sample()
     sample = sample.transpose(1, 3).cpu().data.numpy()[:10]
