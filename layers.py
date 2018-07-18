@@ -15,6 +15,22 @@ class Conv2dZeroInit(nn.Conv2d):
         self.bias.data.fill_(0.)
 
 '''
+Convolution Interlaced with Actnorm
+'''
+class Conv2dActNorm(nn.Module):
+    def __init__(self, channels_in, channels_out, filter_size, stride=1, padding=None):
+        from invertible_layers import ActNorm
+        super(Conv2dActNorm, self).__init__()
+        padding = (filter_size - 1) // 2 or padding
+        self.conv = nn.Conv2d(channels_in, channels_out, filter_size, padding=padding)
+        self.actnorm = ActNorm(channels_out)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.actnorm.forward_and_jacobian(x, 0.)[0]
+        return x
+
+'''
 Linear layer zero initialization
 '''
 class LinearZeroInit(nn.Linear):
@@ -26,14 +42,13 @@ class LinearZeroInit(nn.Linear):
 Shallow NN used for skip connection. Labelled `f` in the original repo.
 '''
 class NN(nn.Module):
-    def __init__(self, channels_in, channels_out=None):
+    def __init__(self, channels_in, channels_out=None, conv_op=Conv2dActNorm):
         super(NN, self).__init__()
         channels_out = channels_out or channels_in
-        #wn = lambda x: x
         self.main = nn.Sequential(*[
-            wn(nn.Conv2d(channels_in, channels_in, 3, stride=1, padding=(3 - 1) // 2)),
+            conv_op(channels_in, channels_in, 3, stride=1, padding=(3 - 1) // 2),
             nn.ReLU(True), 
-            wn(nn.Conv2d(channels_in, channels_in, 1, stride=1, padding=(1 - 1) // 2)),
+            conv_op(channels_in, channels_in, 1, stride=1, padding=(1 - 1) // 2),
             nn.ReLU(True), 
             Conv2dZeroInit(channels_in, channels_out, 3, stride=1, padding=(3 - 1) // 2)])
 

@@ -13,10 +13,9 @@ from PIL import Image
 from invertible_layers import * 
 from utils import * 
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=512)
-parser.add_argument('--depth', type=int, default=5) # 32
+parser.add_argument('--depth', type=int, default=15) # 32
 parser.add_argument('--n_levels', type=int, default=3) # 3 ?
 parser.add_argument('--norm', type=str, default=None)
 parser.add_argument('--permutation', type=str, default='shuffle')
@@ -39,18 +38,16 @@ train_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, downloa
 test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, 
                 transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=4)
 
-
 model = Glow((args.batch_size, 1, 32, 32), args)
 model = model.cuda()
 print(model)
 print("number of model parameters:", sum([np.prod(p.size()) for p in model.parameters()]))
-optim = optim.Adam(model.parameters(), lr=5e-4)
+optim = optim.Adam(model.parameters(), lr=1e-3)
 
 # data dependant init
 if args.norm == 'actnorm': 
     init_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, download=True, 
-                    train=True, transform=tf), batch_size=500, 
-                        shuffle=True, num_workers=4)
+                    train=True, transform=tf), batch_size=512, shuffle=True, num_workers=1)
     
     model.eval()
     with torch.no_grad():
@@ -59,6 +56,7 @@ if args.norm == 'actnorm':
             _ = model(img, 0.)
             break
 
+print('staring training')
 # trainig loop
 for epoch in range(500):
     print('epoch %s' % epoch)
@@ -99,7 +97,7 @@ for epoch in range(500):
             nobj = - objective / img.shape[0]
             avg_test_bits_x += nobj / (np.log(2.) * np.prod(img.shape[1:]))
 
-        print('avg test bits per pixel {:.4f}'.format(avg_train_bits_x.item() / i))
+        print('avg test bits per pixel {:.4f}'.format(avg_test_bits_x.item() / i))
         
     sample = model.sample().cpu().data.numpy()[:10]
     sample = sample.reshape(10 * sample.shape[-1], sample.shape[-2])

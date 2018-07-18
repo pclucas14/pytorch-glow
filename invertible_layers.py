@@ -72,8 +72,8 @@ class Shuffle(Layer):
 # Reversing on the channel axis
 class Reverse(Shuffle):
     def __init__(self, num_channels):
-        super(Reverse, self).__init__()
-        indices = np.copy(np.arange(num_channel)[::-1])
+        super(Reverse, self).__init__(num_channels)
+        indices = np.copy(np.arange(num_channels)[::-1])
         self.indices = torch.from_numpy(indices).long()
         self.indices = self.indices.cuda()
         self.rev_indices = self.indices
@@ -367,9 +367,6 @@ class BatchNorm(Layer, _BatchNorm):
         else: 
             output = None
         
-        # Since there is no way to fetch the actual std used during batch norm, we 
-        # must recalculate it. It **sems** the following (commented) code replicates the 
-
         input_shape = input.size()
         input = input.view(input_shape[0], input_shape[1], -1)
 
@@ -394,9 +391,7 @@ class BatchNorm(Layer, _BatchNorm):
             self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean.data
             self.running_var  = (1 - self.momentum) * self.running_var  + self.momentum * unbias_var.data
 
-        # TODO: make sure this is equivalent to REAL_NVP's batch_norm_log_diff
-        # TODO: if keep batch axis, do not multiply by batch shape
-        log_det_jacobian = torch.log(torch.abs(inv_std)) * input.size(0) * input.size(-1)
+        log_det_jacobian = torch.log(torch.abs(inv_std)) * sum_size
         objective += log_det_jacobian.sum()
 
         return output.view(input_shape), objective
@@ -428,11 +423,9 @@ class BatchNorm(Layer, _BatchNorm):
         output = output + unsqueeze_fn(mean)
        
         check_np = output.cpu().data.numpy()
-        # if np.isnan(check_np).any() or np.isinf(check_np).any(): pdb.set_trace()
+        if np.isnan(check_np).any() or np.isinf(check_np).any(): pdb.set_trace()
 
-        log_det_jacobian = torch.log(torch.abs(inv_std)) * input.size(0) * input.size(-1)
-        # TODO: make sure this is equivalent to REAL_NVP's batch_norm_log_diff
-        # TODO: if keep batch axis, do not multiply by batch shape
+        log_det_jacobian = torch.log(torch.abs(inv_std)) * sum_size
         objective -= log_det_jacobian.sum()
 
         return output.view(input_shape), objective
@@ -485,7 +478,8 @@ class RevNet(LayerList):
 class Glow(LayerList, nn.Module):
     def __init__(self, input_shape, args):
         super(Glow, self).__init__()
-        layers = [Squeeze(input_shape)] 
+        layers = [Squeeze(input_shape)]
+        print('initial input', input_shape)
         for i in range(args.n_levels):
             input_shape = layers[-1].output_shape
             layers += [RevNet(input_shape, args)]
@@ -493,14 +487,11 @@ class Glow(LayerList, nn.Module):
             if i < args.n_levels - 1: 
                 layers += [Split(input_shape)]
         
+            print(input_shape)
         layers += [GaussianPrior(input_shape, args)]
         self.layers = nn.ModuleList(layers)
         self.output_shape = input_shape
 
         self.forward = self.forward_and_jacobian
+        self.sample = lambda : self.reverse_and_jacobian(None, 0.)[0]
 
-
-    def sample(self):
-        sample, _ = self.reverse_and_jacobian(None, 0.)
-        return sample
-    
