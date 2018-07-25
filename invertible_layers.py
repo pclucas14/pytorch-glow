@@ -124,11 +124,6 @@ class Squeeze(Layer):
         self.factor = factor
         self.input_shape = input_shape
 
-    @property
-    def output_shape(self):
-        bs, c, h, w = self.input_shape
-        return (bs, c * self.factor * self.factor, h // self.factor, w // self.factor)
-
     def squeeze_bchw(self, x):
         bs, c, h, w = x.size()
         assert h % self.factor == 0 and w % self.factor == 0, pdb.set_trace()

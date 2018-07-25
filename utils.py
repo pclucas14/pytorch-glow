@@ -16,21 +16,6 @@ def flatten_sum(logps):
         logps = logps.sum(dim=-1)
     return logps
 
-def preprocess(x):
-    raise Exception
-    x = x.float()
-    
-    x = x / 256. # - .5
-    return x
-
-def postprocess(x):
-    raise Exception
-    return x
-    # x = (x + .5) * 256.
-    # x = x * 256.
-    # x = torch.floor(x) * (256./256.)
-    # return torch.clamp(x, min=0., max=255).byte()
-
 # ------------------------------------------------------------------------------
 # Distributions
 # ------------------------------------------------------------------------------
