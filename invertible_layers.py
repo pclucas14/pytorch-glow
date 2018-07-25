@@ -36,9 +36,7 @@ class LayerList(Layer):
 
     def forward_and_jacobian(self, x, objective):
         for layer in self.layers:
-            assert not isinstance(objective, float), pdb.set_trace()
             x, objective = layer.forward_and_jacobian(x, objective)
-            assert not isinstance(objective, float), pdb.set_trace()
         return x, objective
 
     def reverse_and_jacobian(self, x, objective):
@@ -100,7 +98,6 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
                     self.dilation, self.groups)
 
-        assert objective.shape[0] != 1
         return output, objective
 
     def reverse_and_jacobian(self, x, objective):
@@ -218,9 +215,8 @@ class GaussianPrior(Layer):
         mean, logsd = torch.chunk(mean_and_logsd, 2, dim=1)
 
         pz = gaussian_diag(mean, logsd)
-        objective += pz.logp(x) # .sum()
+        objective += pz.logp(x) 
 
-        assert objective.shape[0] != 1
         return None, objective
 
     def reverse_and_jacobian(self, x, objective):
