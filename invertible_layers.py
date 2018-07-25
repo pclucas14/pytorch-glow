@@ -10,9 +10,10 @@ import pdb
 from layers import * 
 from utils import * 
 
-'''
-Abstract Classes to define common interface for invertible functions
-'''
+# ------------------------------------------------------------------------------
+# Abstract Classes to define common interface for invertible functions
+# ------------------------------------------------------------------------------
+
 # Abstract Class for bijective functions
 class Layer(nn.Module):
     def __init__(self):
@@ -34,8 +35,10 @@ class LayerList(Layer):
         return self.layers[i]
 
     def forward_and_jacobian(self, x, objective):
-        for layer in self.layers: 
+        for layer in self.layers:
+            assert not isinstance(objective, float), pdb.set_trace()
             x, objective = layer.forward_and_jacobian(x, objective)
+            assert not isinstance(objective, float), pdb.set_trace()
         return x, objective
 
     def reverse_and_jacobian(self, x, objective):
@@ -43,11 +46,11 @@ class LayerList(Layer):
             x, objective = layer.reverse_and_jacobian(x, objective)
         return x, objective
 
-###############################################################################
 
-'''
-Permutation Layers 
-'''
+# ------------------------------------------------------------------------------
+# Permutation Layers 
+# ------------------------------------------------------------------------------
+
 # Shuffling on the channel axis
 class Shuffle(Layer):
     def __init__(self, num_channels):
@@ -68,7 +71,6 @@ class Shuffle(Layer):
     def reverse_and_jacobian(self, x, objective):
         return x[:, self.rev_indices], objective
         
-
 # Reversing on the channel axis
 class Reverse(Shuffle):
     def __init__(self, num_channels):
@@ -83,8 +85,6 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
     def __init__(self, num_channels):
         self.num_channels = num_channels
         nn.Conv2d.__init__(self, num_channels, num_channels, 1, bias=False)
-        #super(Invertible1x1Conv, self).__init__(num_channels, num_channels, 1, bias=False)
-        #Layer.__init__(self)
 
     def reset_parameters(self):
         # initialization done with rotation matrix
@@ -95,25 +95,27 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         self.weight.data.copy_(w_init)
 
     def forward_and_jacobian(self, x, objective):
-        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) * x.size(0)
+        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) 
         objective += dlogdet
         output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
                     self.dilation, self.groups)
+
+        assert objective.shape[0] != 1
         return output, objective
 
     def reverse_and_jacobian(self, x, objective):
-        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) * x.size(0)
+        dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) 
         objective -= dlogdet
         weight_inv = torch.inverse(self.weight.squeeze()).unsqueeze(-1).unsqueeze(-1)
         output = F.conv2d(x, weight_inv, self.bias, self.stride, self.padding, \
                     self.dilation, self.groups)
         return output, objective
 
-###############################################################################
 
-'''
-Layers involving squeeze operations defined in RealNVP / Glow. 
-'''
+# ------------------------------------------------------------------------------
+# Layers involving squeeze operations defined in RealNVP / Glow. 
+# ------------------------------------------------------------------------------
+
 # Trades space for depth and vice versa
 class Squeeze(Layer):
     def __init__(self, input_shape, factor=2):
@@ -161,11 +163,11 @@ class Squeeze(Layer):
 
         return self.unsqueeze_bchw(x), objective
 
-###############################################################################
 
-'''
-Layers involving prior
-'''
+# ------------------------------------------------------------------------------
+# Layers involving prior
+# ------------------------------------------------------------------------------
+
 # Split Layer for multi-scale architecture. Factor of 2 hardcoded.
 class Split(Squeeze):
     def __init__(self, input_shape):
@@ -188,17 +190,18 @@ class Split(Squeeze):
         z1, z2 = torch.chunk(x, 2, dim=1)
         pz = self.split2d_prior(z1)
         # TODO: modify this to keep batch if objective is tensor
-        objective += pz.logp(z2).sum()
-        z1 = self.squeeze_bchw(z1)
+        objective += pz.logp(z2) 
+        #z1 = self.squeeze_bchw(z1)
         return z1, objective
 
     def reverse_and_jacobian(self, x, objective):
-        z1 = self.unsqueeze_bchw(x)
+        #z1 = self.unsqueeze_bchw(x)
+        z1 = x
         pz = self.split2d_prior(z1)
         z2 = pz.sample()
         z = torch.cat([z1, z2], dim=1)
         # TODO: is this correct ?
-        objective -= pz.logp(z2).sum()
+        objective -= pz.logp(z2) 
         return z, objective
 
 # Gaussian Prior that's compatible with the Layer framework
@@ -220,13 +223,13 @@ class GaussianPrior(Layer):
         mean, logsd = torch.chunk(mean_and_logsd, 2, dim=1)
 
         pz = gaussian_diag(mean, logsd)
-        objective += pz.logp(x).sum()
+        objective += pz.logp(x) # .sum()
 
+        assert objective.shape[0] != 1
         return None, objective
 
     def reverse_and_jacobian(self, x, objective):
         assert x is None
-        objective = objective or 0.
         bs, c, h, w = self.input_shape
         mean_and_logsd = torch.cuda.FloatTensor(bs, 2 * c, h, w).fill_(0.)
 
@@ -238,11 +241,11 @@ class GaussianPrior(Layer):
 
         return pz.sample(), objective
          
-###############################################################################
 
-'''
-Coupling Layers
-'''
+# ------------------------------------------------------------------------------
+# Coupling Layers
+# ------------------------------------------------------------------------------
+
 # Additive Coupling Layer
 class AdditiveCoupling(Layer):
     def __init__(self, num_features):
@@ -274,8 +277,7 @@ class AffineCoupling(Layer):
         scale = F.sigmoid(h[:, 1::2] + 2.)
         z2 += shift
         z2 *= scale
-        # TODO: check if should keep batch axis
-        objective += torch.sum(torch.log(scale))
+        objective += flatten_sum(torch.log(scale))
 
         return torch.cat([z1, z2], dim=1), objective
 
@@ -286,57 +288,47 @@ class AffineCoupling(Layer):
         scale = F.sigmoid(h[:, 1::2] + 2.)
         z2 /= scale
         z2 -= shift
-        # TODO: check if should keep batch axis
-        objective -= torch.sum(torch.log(scale))
+        objective -= flatten_sum(torch.log(scale))
         return torch.cat([z1, z2], dim=1), objective
 
-###############################################################################
 
-'''
-Normalizing Layers
-'''
+# ------------------------------------------------------------------------------
+# Normalizing Layers
+# ------------------------------------------------------------------------------
+
 # ActNorm Layer with data-dependant init
 class ActNorm(Layer):
-    def __init__(self, num_features, logscale_factor=3., scale=1.):
+    def __init__(self, num_features, logscale_factor=1., scale=1.):
         super(Layer, self).__init__()
         self.initialized = False
         self.logscale_factor = logscale_factor
         self.scale = scale
-        self.register_buffer('b', torch.Tensor(1, num_features, 1))
-        self.register_buffer('logs', torch.Tensor(1, num_features, 1))
+        self.register_parameter('b', nn.Parameter(torch.Tensor(1, num_features, 1)))
+        self.register_parameter('logs', nn.Parameter(torch.Tensor(1, num_features, 1)))
 
     def forward_and_jacobian(self, input, objective):
         input_shape = input.size()
         input = input.view(input_shape[0], input_shape[1], -1)
 
         if not self.initialized: 
-            assert not self.training
             self.initialized = True
+            unsqueeze = lambda x: x.unsqueeze(0).unsqueeze(-1).detach()
 
-            # Compute the sum and the square-sum
+            # Compute the mean and variance
             sum_size = input.size(0) * input.size(-1)
             input_sum = input.sum(dim=0).sum(dim=-1)
-            input_ssum = (input ** 2).sum(dim=0).sum(dim=-1)
-
-            # Compute mean and var
-            mean = input_sum / sum_size
-            sumvar = input_ssum - input_sum * mean
-            var = (sumvar / sum_size)
-        
-            unsqueeze_fn = lambda x: x.unsqueeze(0).unsqueeze(-1).detach()
-            mean, var = unsqueeze_fn(mean), unsqueeze_fn(var)
-
-            # initialize `b` with mean
-            self.b.data.copy_(-1. * mean.data)
-            
-            # initialize `log` with the logarithm of the standard deviation
-            logs = torch.log(self.scale / (torch.sqrt(var) + 1e-6)) / self.logscale_factor
+            b = input_sum / sum_size * -1.
+            vars = ((input - unsqueeze(b)) ** 2).sum(dim=0).sum(dim=1) / sum_size
+            vars = unsqueeze(vars)
+            logs = torch.log(self.scale / torch.sqrt(vars) + 1e-6) / self.logscale_factor
+           
+            self.b.data.copy_(unsqueeze(b).data)
             self.logs.data.copy_(logs.data)
-            
+
         logs = self.logs * self.logscale_factor
         b = self.b
         output = (input + b) * torch.exp(logs)
-        dlogdet = torch.sum(logs) * input.size(0) * input.size(-1) # b x c x h  
+        dlogdet = torch.sum(logs) * input.size(-1) # c x h  
 
         return output.view(input_shape), objective + dlogdet
 
@@ -346,94 +338,18 @@ class ActNorm(Layer):
         input = input.view(input_shape[0], input_shape[1], -1)
         logs = self.logs * self.logscale_factor
         b = self.b
-        output = input / torch.exp(logs) - b
-        dlogdet = torch.sum(logs) * input.size(0) * input.size(1) # b x c x h  
+        output = input * torch.exp(-logs) - b
+        dlogdet = torch.sum(logs) * input.size(-1) # c x h  
 
         return output.view(input_shape), objective - dlogdet
 
+# (Note: a BatchNorm layer can be found in previous commits)
 
-# Batch Normalization, with no affine parameters, and log_det
-class BatchNorm(Layer, _BatchNorm):
-    def __init__(self, num_features, eps=1e-5, momentum=0.05):
-        # this transformation keeps track of running stats, but is not affine. 
-        _BatchNorm.__init__(self, num_features, eps=eps, momentum=momentum, affine=False)
-        # Layer.__init__(self) 
 
-    def forward_and_jacobian(self, input, objective):
-        if not self.training: 
-            output = F.batch_norm(input, self.running_mean, self.running_var, None, None, 
-                self.training, self.momentum, self.eps)
-        else: 
-            output = None
-        
-        input_shape = input.size()
-        input = input.view(input_shape[0], input_shape[1], -1)
+# ------------------------------------------------------------------------------
+# Stacked Layers
+# ------------------------------------------------------------------------------
 
-        # 2) Compute the sum and the square-sum
-        sum_size = input.size(0) * input.size(-1)
-        input_sum = input.sum(dim=0).sum(dim=-1)
-        input_ssum = (input ** 2).sum(dim=0).sum(dim=-1)
-
-        # 3) compute mean and variance
-        mean = input_sum / sum_size
-        sumvar = input_ssum - input_sum * mean
-        var = (sumvar / sum_size).clamp(self.eps)
-        unbias_var = sumvar / (sum_size - 1)
-        inv_std = var ** -0.5
-         
-        # 4) normalize
-        unsqueeze_fn = lambda x: x.unsqueeze(0).unsqueeze(-1).detach()
-        output = (input - unsqueeze_fn(mean)) * unsqueeze_fn(inv_std) if output is None else output
-
-        # 5) update running statistics
-        if self.training: 
-            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean.data
-            self.running_var  = (1 - self.momentum) * self.running_var  + self.momentum * unbias_var.data
-
-        log_det_jacobian = torch.log(inv_std) * sum_size
-        objective += log_det_jacobian.sum()
-
-        return output.view(input_shape), objective
-
-    def reverse_and_jacobian(self, input, objective):
-        # assert not self.training, 'reverse pass should only be used for sampling'
-        
-        # 1) Resize the input ot (B, C, -1)
-        input_shape = input.size()
-        input = input.view(input_shape[0], input_shape[1], -1)
-
-        # 2) Compute the sum and the square-sum
-        sum_size = input.size(0) * input.size(-1)
-        input_sum = input.sum(dim=0).sum(dim=-1)
-        input_ssum = (input ** 2).sum(dim=0).sum(dim=-1)
-
-        # 3) compute mean and variance
-        mean = input_sum / sum_size
-        sumvar = input_ssum - input_sum * mean
-        var = (sumvar / sum_size).clamp(self.eps)
-        unbias_var = sumvar / (sum_size - 1)
-        inv_std = var ** -0.5
-
-        # 4) normalize, but the other way around
-        var, mean = self.running_var, self.running_mean
-        
-        unsqueeze_fn = lambda x: x.unsqueeze(0).unsqueeze(-1).detach()
-        output = input * unsqueeze_fn(var) ** 0.5
-        output = output + unsqueeze_fn(mean)
-       
-        check_np = output.cpu().data.numpy()
-        if np.isnan(check_np).any() or np.isinf(check_np).any(): pdb.set_trace()
-
-        log_det_jacobian = torch.log(inv_std) * sum_size
-        objective -= log_det_jacobian.sum()
-
-        return output.view(input_shape), objective
-
-###############################################################################
-
-'''
-Stacked Layers
-'''
 # 1 step of the flow (see Figure 2 a) in the original paper)
 class RevNetStep(LayerList):
     def __init__(self, num_channels, args):
@@ -442,8 +358,6 @@ class RevNetStep(LayerList):
         layers = []
         if args.norm == 'actnorm': 
             layers += [ActNorm(num_channels)]
-        elif args.norm == 'batchnorm':
-            layers += [BatchNorm(num_channels)]
         else: 
             assert not args.norm	       
  
@@ -472,25 +386,40 @@ class RevNet(LayerList):
         bs, c, h, w = input_shape 
         self.layers = nn.ModuleList([RevNetStep(c, args) for _ in range(args.depth)])
 
-
 # Full model
-class Glow(LayerList, nn.Module):
+class Glow_(LayerList, nn.Module):
     def __init__(self, input_shape, args):
-        super(Glow, self).__init__()
-        layers = [Squeeze(input_shape)]
-        print('initial input', input_shape)
-        for i in range(args.n_levels):
-            input_shape = layers[-1].output_shape
-            layers += [RevNet(input_shape, args)]
-            
-            if i < args.n_levels - 1: 
-                layers += [Split(input_shape)]
+        super(Glow_, self).__init__()
+        layers = []
+        output_shapes = []
+        _, C, H, W = input_shape
         
-            print(input_shape)
-        layers += [GaussianPrior(input_shape, args)]
+        for i in range(args.n_levels):
+            # Squeeze Layer 
+            layers += [Squeeze(input_shape)]
+            C, H, W = C * 4, H // 2, W // 2
+            output_shapes += [(-1, C, H, W)]
+            
+            # RevNet Block
+            layers += [RevNet(output_shapes[-1], args)]
+            output_shapes += [(-1, C, H, W) for _ in range(args.depth)]
+
+            if i < args.n_levels - 1: 
+                # Split Layer
+                layers += [Split(output_shapes[-1])]
+                C = C // 2
+                output_shapes += [(-1, C, H, W)]
+
+        layers += [GaussianPrior((args.batch_size, C, H, W), args)]
+        output_shapes += [output_shapes[-1]]
+        
         self.layers = nn.ModuleList(layers)
-        self.output_shape = input_shape
-
+        self.output_shapes = output_shapes
+        self.args = args
         self.forward = self.forward_and_jacobian
-        self.sample = lambda : self.reverse_and_jacobian(None, 0.)[0]
 
+    def sample(self):
+        with torch.no_grad():
+            samples = self.reverse_and_jacobian(None, 0.)[0]
+            return samples
+    
