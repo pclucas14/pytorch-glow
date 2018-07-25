@@ -57,7 +57,6 @@ scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=45, gamma=0.1)
 init_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
     download=True, transform=tf), batch_size=512, shuffle=True, num_workers=1)
 
-'''
 with torch.no_grad():
     model.eval()
     for (img, _) in init_loader:
@@ -65,7 +64,7 @@ with torch.no_grad():
         objective = torch.cuda.FloatTensor(img.size(0)).fill_(0.)
         _ = model(img, objective)
         break
-'''
+
 
 # training loop
 # ------------------------------------------------------------------------------
@@ -104,6 +103,7 @@ for epoch in range(500):
             utils.save_image(grid, '../glow/samples/cifar_Test_{}_{}.png'.format(epoch, i // args.print_every))
         
     # test loop
+    # --------------------------------------------------------------------------
     if (epoch + 1) % args.test_every == 0:
         model.eval()
         avg_test_bits_x = 0.
