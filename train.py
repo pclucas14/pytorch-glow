@@ -22,7 +22,8 @@ parser.add_argument('--permutation', type=str, default='shuffle')
 parser.add_argument('--coupling', type=str, default='affine')
 parser.add_argument('--data_dir', type=str, default='../pixelcnn-pp')
 parser.add_argument('--n_bits_x', type=int, default=8)
-parser.add_argument('--print_every', type=int, default=150, help='print NLL every _ minibatches')
+parser.add_argument('--n_epochs', type=int, default=2000)
+parser.add_argument('--print_every', type=int, default=500, help='print NLL every _ minibatches')
 parser.add_argument('--test_every', type=int, default=5, help='test on valid every _ epochs')
 parser.add_argument('--learntop', action='store_true')
 args = parser.parse_args()
@@ -50,7 +51,7 @@ print(model)
 print("number of model parameters:", sum([np.prod(p.size()) for p in model.parameters()]))
 
 # set up the optimizer
-optim = optim.Adam(model.parameters(), lr=4e-4)
+optim = optim.Adam(model.parameters(), lr=1e-3)
 scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=45, gamma=0.1)
 
 # data dependant init
@@ -68,9 +69,9 @@ with torch.no_grad():
 
 # training loop
 # ------------------------------------------------------------------------------
-for epoch in range(500):
+for epoch in range(args.n_epochs):
     print('epoch %s' % epoch)
-    # scheduler.step(epoch)
+    scheduler.step(epoch)
     model.train()
     avg_train_bits_x = 0.
     for i, (img, label) in enumerate(train_loader):
