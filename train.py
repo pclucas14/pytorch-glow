@@ -82,7 +82,7 @@ for epoch in range(args.n_epochs):
         objective += float(-np.log(args.n_bins) * np.prod(img.shape[1:]))
         
         # log_det_jacobian cost (and some prior from Split OP)
-        z, objective = model.forward_and_jacobian(img, objective)
+        z, objective = model(img, objective)
 
         nll = (-objective) / float(np.log(2.) * np.prod(img.shape[1:]))
         

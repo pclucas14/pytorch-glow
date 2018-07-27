@@ -36,7 +36,7 @@ class Conv2dActNorm(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        x = self.actnorm.forward_and_jacobian(x, -1)[0]
+        x = self.actnorm.forward_(x, -1)[0]
         return x
 
 '''
@@ -51,7 +51,7 @@ class LinearZeroInit(nn.Linear):
 Shallow NN used for skip connection. Labelled `f` in the original repo.
 '''
 def NN(in_channels, hidden_channels=512, channels_out=None):
-    channels_out = channels_out or channels_in
+    channels_out = channels_out or in_channels
     return nn.Sequential(
         Conv2dActNorm(in_channels, hidden_channels, 3, stride=1, padding=1),
         nn.ReLU(inplace=True),

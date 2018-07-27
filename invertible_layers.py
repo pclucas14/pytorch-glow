@@ -19,10 +19,10 @@ class Layer(nn.Module):
     def __init__(self):
         super(Layer, self).__init__()
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         raise NotImplementedError
 
-    def reverse_and_jacobian(self, y, objective):
+    def reverse_(self, y, objective):
         raise NotImplementedError
 
 # Wrapper for stacking multiple layers 
@@ -34,14 +34,14 @@ class LayerList(Layer):
     def __getitem__(self, i):
         return self.layers[i]
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         for layer in self.layers:
-            x, objective = layer.forward_and_jacobian(x, objective)
+            x, objective = layer.forward_(x, objective)
         return x, objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         for layer in reversed(self.layers): 
-            x, objective = layer.reverse_and_jacobian(x, objective)
+            x, objective = layer.reverse_(x, objective)
         return x, objective
 
 
@@ -63,10 +63,10 @@ class Shuffle(Layer):
         rev_indices = torch.from_numpy(rev_indices).long()
         self.indices, self.rev_indices = indices.cuda(), rev_indices.cuda()
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         return x[:, self.indices], objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         return x[:, self.rev_indices], objective
         
 # Reversing on the channel axis
@@ -92,7 +92,7 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         w_init = w_init.unsqueeze(-1).unsqueeze(-1)
         self.weight.data.copy_(w_init)
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) 
         objective += dlogdet
         output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
@@ -100,7 +100,7 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
 
         return output, objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) 
         objective -= dlogdet
         weight_inv = torch.inverse(self.weight.squeeze()).unsqueeze(-1).unsqueeze(-1)
@@ -143,13 +143,13 @@ class Squeeze(Layer):
         x = x.reshape(-1, int(h * self.factor), int(w * self.factor), int(c / self.factor ** 2))
         return x.transpose(3, 1).contiguous()
     
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         if len(x.size()) != 4: 
             raise NotImplementedError # Maybe ValueError would be more appropriate
 
         return self.squeeze_bchw(x), objective
         
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         if len(x.size()) != 4: 
             raise NotImplementedError
 
@@ -177,7 +177,7 @@ class Split(Squeeze):
         mean, logs = h[:, 0::2], h[:, 1::2]
         return gaussian_diag(mean, logs)
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         bs, c, h, w = x.size()
         z1, z2 = torch.chunk(x, 2, dim=1)
         pz = self.split2d_prior(z1)
@@ -186,7 +186,7 @@ class Split(Squeeze):
         #z1 = self.squeeze_bchw(z1)
         return z1, objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         #z1 = self.unsqueeze_bchw(x)
         z1 = x
         pz = self.split2d_prior(z1)
@@ -206,7 +206,7 @@ class GaussianPrior(Layer):
         else: 
             self.conv = None
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         mean_and_logsd = torch.cat([torch.zeros_like(x) for _ in range(2)], dim=1)
         
         if self.conv: 
@@ -219,7 +219,7 @@ class GaussianPrior(Layer):
 
         return None, objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         assert x is None
         bs, c, h, w = self.input_shape
         mean_and_logsd = torch.cuda.FloatTensor(bs, 2 * c, h, w).fill_(0.)
@@ -244,12 +244,12 @@ class AdditiveCoupling(Layer):
         assert num_features % 2 == 0
         self.NN = NN(num_features // 2)
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         z1, z2 = torch.chunk(x, 2, dim=1)
         z2 += self.NN(z1)
         return torch.cat([z1, z2], dim=1), objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         z1, z2 = torch.chunk(x, 2, dim=1)
         z2 -= self.NN(z1)
         return torch.cat([z1, z2], dim=1), objective
@@ -261,7 +261,7 @@ class AffineCoupling(Layer):
         # assert num_features % 2 == 0
         self.NN = NN(num_features // 2, channels_out=num_features)
 
-    def forward_and_jacobian(self, x, objective):
+    def forward_(self, x, objective):
         z1, z2 = torch.chunk(x, 2, dim=1)
         h = self.NN(z1)
         shift = h[:, 0::2]
@@ -272,7 +272,7 @@ class AffineCoupling(Layer):
 
         return torch.cat([z1, z2], dim=1), objective
 
-    def reverse_and_jacobian(self, x, objective):
+    def reverse_(self, x, objective):
         z1, z2 = torch.chunk(x, 2, dim=1)
         h = self.NN(z1)
         shift = h[:, 0::2]
@@ -297,7 +297,7 @@ class ActNorm(Layer):
         self.register_parameter('b', nn.Parameter(torch.Tensor(1, num_features, 1)))
         self.register_parameter('logs', nn.Parameter(torch.Tensor(1, num_features, 1)))
 
-    def forward_and_jacobian(self, input, objective):
+    def forward_(self, input, objective):
         input_shape = input.size()
         input = input.view(input_shape[0], input_shape[1], -1)
 
@@ -323,7 +323,7 @@ class ActNorm(Layer):
 
         return output.view(input_shape), objective + dlogdet
 
-    def reverse_and_jacobian(self, input, objective):
+    def reverse_(self, input, objective):
         assert self.initialized
         input_shape = input.size()
         input = input.view(input_shape[0], input_shape[1], -1)
@@ -370,12 +370,6 @@ class RevNetStep(LayerList):
 
         self.layers = nn.ModuleList(layers)
 
-# 1 "scale" i.e. stacking of multiple steps. See Figure 2 b) in the original paper
-class RevNet(LayerList):
-    def __init__(self, input_shape, args):
-        super(RevNet, self).__init__()
-        bs, c, h, w = input_shape 
-        self.layers = nn.ModuleList([RevNetStep(c, args) for _ in range(args.depth)])
 
 # Full model
 class Glow_(LayerList, nn.Module):
@@ -392,7 +386,7 @@ class Glow_(LayerList, nn.Module):
             output_shapes += [(-1, C, H, W)]
             
             # RevNet Block
-            layers += [RevNet(output_shapes[-1], args)]
+            layers += [RevNetStep(C, args) for _ in range(args.depth)]
             output_shapes += [(-1, C, H, W) for _ in range(args.depth)]
 
             if i < args.n_levels - 1: 
@@ -407,10 +401,29 @@ class Glow_(LayerList, nn.Module):
         self.layers = nn.ModuleList(layers)
         self.output_shapes = output_shapes
         self.args = args
-        self.forward = self.forward_and_jacobian
+        self.forward = self.forward_
+        self.flatten()
 
     def sample(self):
         with torch.no_grad():
-            samples = self.reverse_and_jacobian(None, 0.)[0]
+            samples = self.reverse_(None, 0.)[0]
             return samples
+
+    def flatten(self):
+        # flattens the list of layers to avoid recursive call every time. 
+        pdb.set_trace()
+        processed_layers = []
+        to_be_processed = [self]
+        while len(to_be_processed) > 0:
+            current = to_be_processed.pop(0)
+            if isinstance(current, LayerList):
+                to_be_processed = [x for x in current.layers] + to_be_processed
+            elif isinstance(current, Layer):
+                processed_layers += [current]
+            else: 
+                pdb.set_trace()
+                raise ValueError
+        pdb.set_trace()
+        self.layers = nn.ModuleList(processed_layers)
+
     
