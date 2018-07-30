@@ -16,6 +16,30 @@ def flatten_sum(logps):
         logps = logps.sum(dim=-1)
     return logps
 
+# torch DataParallel is not sending copies of Models properly on GPU :/
+class data_parallel(nn.Module):
+    def __init__(self, input, device_ids, output_device=0):
+        super().__init__()
+        self.module = input
+        self.device_ids = device_ids
+        self.output_device = output_device
+
+    def forward(self, input):
+        if not self.device_ids:
+            return self.module(input)
+
+        if self.output_device is None:
+            self.output_device = device_ids[0]
+
+        pdb.set_trace()
+
+        replicas = nn.parallel.replicate(self.module, self.device_ids)
+        inputs = nn.parallel.scatter(input, self.device_ids)
+        replicas = replicas[:len(inputs)]
+        outputs = nn.parallel.parallel_apply(replicas, inputs)
+        return nn.parallel.gather(outputs, self.output_device)
+        
+
 # ------------------------------------------------------------------------------
 # Distributions
 # ------------------------------------------------------------------------------

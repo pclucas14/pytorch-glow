@@ -61,7 +61,9 @@ class Shuffle(Layer):
 
         indices = torch.from_numpy(indices).long()
         rev_indices = torch.from_numpy(rev_indices).long()
-        self.indices, self.rev_indices = indices.cuda(), rev_indices.cuda()
+        self.register_buffer('indices', indices)
+        self.register_buffer('rev_indices', rev_indices)
+        # self.indices, self.rev_indices = indices.cuda(), rev_indices.cuda()
 
     def forward_(self, x, objective):
         return x[:, self.indices], objective
@@ -74,9 +76,9 @@ class Reverse(Shuffle):
     def __init__(self, num_channels):
         super(Reverse, self).__init__(num_channels)
         indices = np.copy(np.arange(num_channels)[::-1])
-        self.indices = torch.from_numpy(indices).long()
-        self.indices = self.indices.cuda()
-        self.rev_indices = self.indices
+        indices = torch.from_numpy(indices).long()
+        self.indices.copy_(indices)
+        self.rev_indices.copy_(indices)
 
 # Invertible 1x1 convolution
 class Invertible1x1Conv(Layer, nn.Conv2d):
@@ -88,7 +90,7 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         # initialization done with rotation matrix
         w_init = np.linalg.qr(np.random.randn(self.num_channels, self.num_channels))[0]
         w_init = torch.from_numpy(w_init.astype('float32'))
-        w_init = w_init.cuda()
+        # w_init = w_init.cuda()
         w_init = w_init.unsqueeze(-1).unsqueeze(-1)
         self.weight.data.copy_(w_init)
 
@@ -96,7 +98,7 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         dlogdet = torch.det(self.weight.squeeze()).abs().log() * x.size(-2) * x.size(-1) 
         objective += dlogdet
         output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
-                    self.dilation, self.groups)
+            self.dilation, self.groups)
 
         return output, objective
 
@@ -126,22 +128,32 @@ class Squeeze(Layer):
         assert h % self.factor == 0 and w % self.factor == 0, pdb.set_trace()
         
         # done as in GLOW repository
-        x = x.transpose(3, 1).contiguous()
-        x = x.reshape(-1, h // self.factor, self.factor, w // self.factor, self.factor, c)
-        x = x.permute(0, 1, 3, 5, 2, 4)
-        x = x.reshape(-1, h // self.factor, w // self.factor, c * self.factor ** 2)
-        return x.transpose(3, 1).contiguous()
+        x = x.view(bs, c, h // self.factor, self.factor, w // self.factor, self.factor)
+        x = x.permute(0, 1, 3, 5, 2, 4).contiguous()
+        x = x.view(bs, c * self.factor * self.factor, h // self.factor, w // self.factor)
+
+        #x = x.transpose(3, 1).contiguous()
+        #x = x.reshape(-1, h // self.factor, self.factor, w // self.factor, self.factor, c)
+        #x = x.permute(0, 1, 3, 5, 2, 4)
+        #x = x.reshape(-1, h // self.factor, w // self.factor, c * self.factor ** 2)
+        return x#.transpose(3, 1).contiguous()
  
     def unsqueeze_bchw(self, x):
         bs, c, h, w = x.size()
         assert c >= 4 and c % 4 == 0
 
+        x = x.view(bs, c // self.factor ** 2, self.factor, self.factor, h, w)
+        x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
+        x = x.view(bs, c // self.factor ** 2, h * self.factor, w * self.factor)
+
+        '''
         # done as in GLOW repository
         x = x.transpose(3, 1).contiguous()
         x = x.reshape(-1, h, w, int(c / self.factor ** 2), self.factor, self.factor)
         x = x.permute(0, 1, 4, 2, 5, 3)
         x = x.reshape(-1, int(h * self.factor), int(w * self.factor), int(c / self.factor ** 2))
         return x.transpose(3, 1).contiguous()
+        '''
     
     def forward_(self, x, objective):
         if len(x.size()) != 4: 
@@ -161,16 +173,11 @@ class Squeeze(Layer):
 # ------------------------------------------------------------------------------
 
 # Split Layer for multi-scale architecture. Factor of 2 hardcoded.
-class Split(Squeeze):
+class Split(Layer):
     def __init__(self, input_shape):
-        super(Split, self).__init__(input_shape)
+        super(Split, self).__init__()
         bs, c, h, w = input_shape
         self.conv_zero = Conv2dZeroInit(c // 2, c, 3, padding=(3 - 1) // 2)
-
-    @property
-    def output_shape(self):
-        bs, c, h, w = self.input_shape
-        return (bs, c * 2, h // 2, w // 2)
 
     def split2d_prior(self, x):
         h = self.conv_zero(x)
@@ -181,19 +188,14 @@ class Split(Squeeze):
         bs, c, h, w = x.size()
         z1, z2 = torch.chunk(x, 2, dim=1)
         pz = self.split2d_prior(z1)
-        # TODO: modify this to keep batch if objective is tensor
         objective += pz.logp(z2) 
-        #z1 = self.squeeze_bchw(z1)
         return z1, objective
 
     def reverse_(self, x, objective):
-        #z1 = self.unsqueeze_bchw(x)
-        z1 = x
-        pz = self.split2d_prior(z1)
+        pz = self.split2d_prior(x)
         z2 = pz.sample()
-        z = torch.cat([z1, z2], dim=1)
-        # TODO: is this correct ?
-        objective -= pz.logp(z2) 
+        z = torch.cat([x, z2], dim=1)
+        # objective -= pz.logp(z2) 
         return z, objective
 
 # Gaussian Prior that's compatible with the Layer framework
@@ -221,9 +223,8 @@ class GaussianPrior(Layer):
 
     def reverse_(self, x, objective):
         assert x is None
-        bs, c, h, w = self.input_shape
-        mean_and_logsd = torch.cuda.FloatTensor(bs, 2 * c, h, w).fill_(0.)
-
+        mean_and_logsd = torch.cat([torch.zeros_like(x) for _ in range(2)], dim=1)
+        
         if self.conv: 
             mean_and_logsd = self.conv(mean_and_logsd)
 
@@ -294,8 +295,8 @@ class ActNorm(Layer):
         self.initialized = False
         self.logscale_factor = logscale_factor
         self.scale = scale
-        self.register_parameter('b', nn.Parameter(torch.Tensor(1, num_features, 1)))
-        self.register_parameter('logs', nn.Parameter(torch.Tensor(1, num_features, 1)))
+        self.register_parameter('b', nn.Parameter(torch.zeros(1, num_features, 1)))
+        self.register_parameter('logs', nn.Parameter(torch.zeros(1, num_features, 1)))
 
     def forward_(self, input, objective):
         input_shape = input.size()
@@ -312,12 +313,13 @@ class ActNorm(Layer):
             vars = ((input - unsqueeze(b)) ** 2).sum(dim=0).sum(dim=1) / sum_size
             vars = unsqueeze(vars)
             logs = torch.log(self.scale / torch.sqrt(vars) + 1e-6) / self.logscale_factor
-           
+          
             self.b.data.copy_(unsqueeze(b).data)
             self.logs.data.copy_(logs.data)
 
         logs = self.logs * self.logscale_factor
         b = self.b
+        
         output = (input + b) * torch.exp(logs)
         dlogdet = torch.sum(logs) * input.size(-1) # c x h  
 
@@ -350,7 +352,7 @@ class RevNetStep(LayerList):
         if args.norm == 'actnorm': 
             layers += [ActNorm(num_channels)]
         else: 
-            assert not args.norm	       
+            assert not args.norm               
  
         if args.permutation == 'reverse':
             layers += [Reverse(num_channels)]
@@ -401,8 +403,10 @@ class Glow_(LayerList, nn.Module):
         self.layers = nn.ModuleList(layers)
         self.output_shapes = output_shapes
         self.args = args
-        self.forward = self.forward_
         self.flatten()
+
+    def forward(self, *inputs):
+        return self.forward_(*inputs)
 
     def sample(self):
         with torch.no_grad():
@@ -411,7 +415,6 @@ class Glow_(LayerList, nn.Module):
 
     def flatten(self):
         # flattens the list of layers to avoid recursive call every time. 
-        pdb.set_trace()
         processed_layers = []
         to_be_processed = [self]
         while len(to_be_processed) > 0:
@@ -420,10 +423,7 @@ class Glow_(LayerList, nn.Module):
                 to_be_processed = [x for x in current.layers] + to_be_processed
             elif isinstance(current, Layer):
                 processed_layers += [current]
-            else: 
-                pdb.set_trace()
-                raise ValueError
-        pdb.set_trace()
+        
         self.layers = nn.ModuleList(processed_layers)
 
     

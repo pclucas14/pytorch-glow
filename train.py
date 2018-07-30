@@ -8,6 +8,7 @@ from torchvision import datasets, transforms, utils
 import numpy as np
 import pdb
 import argparse
+import time
 
 from invertible_layers import * 
 from utils import * 
@@ -39,14 +40,14 @@ tf = transforms.Compose([transforms.ToTensor(),
                          lambda x: x + torch.zeros_like(x).uniform_(0., 1./args.n_bins)])
 
 train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
-    download=True, transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
+    download=True, transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=10, drop_last=True)
 
 test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
-    transform=tf), batch_size=args.batch_size, shuffle=False, num_workers=4)
+    transform=tf), batch_size=args.batch_size, shuffle=False, num_workers=10)
+
 
 # construct model and ship to GPU
-model = Glow_((args.batch_size, 3, 32, 32), args)
-model = model.cuda()
+model = Glow_((args.batch_size, 3, 32, 32), args).cuda()
 print(model)
 print("number of model parameters:", sum([np.prod(p.size()) for p in model.parameters()]))
 
@@ -62,10 +63,13 @@ with torch.no_grad():
     model.eval()
     for (img, _) in init_loader:
         img = img.cuda()
-        objective = torch.cuda.FloatTensor(img.size(0)).fill_(0.)
+        objective = torch.zeros_like(img[:, 0, 0, 0])
         _ = model(img, objective)
         break
 
+# once init is done, we leverage Data Parallel
+model = nn.DataParallel(model)
+model.to(0)
 
 # training loop
 # ------------------------------------------------------------------------------
@@ -75,6 +79,7 @@ for epoch in range(args.n_epochs):
     model.train()
     avg_train_bits_x = 0.
     for i, (img, label) in enumerate(train_loader):
+        t = time.time()
         img = img.cuda() 
         objective = torch.zeros_like(img[:, 0, 0, 0])
        
@@ -102,6 +107,8 @@ for epoch in range(args.n_epochs):
             sample = model.sample()
             grid = utils.make_grid(sample)
             utils.save_image(grid, '../glow/samples/cifar_Test_{}_{}.png'.format(epoch, i // args.print_every))
+
+        print('iteration took {:.4f}'.format(time.time() - t))
         
     # test loop
     # --------------------------------------------------------------------------
@@ -117,7 +124,7 @@ for epoch in range(args.n_epochs):
                 objective += float(-np.log(args.n_bins) * np.prod(img.shape[1:]))
                 
                 # log_det_jacobian cost (and some prior from Split OP)
-                z, objective = model.forward_and_jacobian(img, objective)
+                z, objective = model(img, objective)
 
                 nll = (-objective) / float(np.log(2.) * np.prod(img.shape[1:]))
                 
