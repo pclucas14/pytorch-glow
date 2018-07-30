@@ -6,9 +6,10 @@ from torch.nn.modules.batchnorm import _BatchNorm
 
 import numpy as np
 import pdb
+import os
 
 # ------------------------------------------------------------------------------
-# Utilities
+# Utility Methods
 # ------------------------------------------------------------------------------
 
 def flatten_sum(logps):
@@ -16,29 +17,31 @@ def flatten_sum(logps):
         logps = logps.sum(dim=-1)
     return logps
 
-# torch DataParallel is not sending copies of Models properly on GPU :/
-class data_parallel(nn.Module):
-    def __init__(self, input, device_ids, output_device=0):
-        super().__init__()
-        self.module = input
-        self.device_ids = device_ids
-        self.output_device = output_device
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
 
-    def forward(self, input):
-        if not self.device_ids:
-            return self.module(input)
+def save_session(model, optim, args, epoch):
+    path = os.path.join(args.save_dir, str(epoch))
+    if not os.path.exists(path):
+        os.makedirs(path)
 
-        if self.output_device is None:
-            self.output_device = device_ids[0]
+    # save the model and optimizer state
+    torch.save(model.state_dict(), os.path.join(path, 'model.pth'))
+    torch.save(optim.state_dict(), os.path.join(path, 'optim.pth'))
+    print('Successfully saved model')
 
+def load_session(model, optim, args):
+    try: 
+        model.load_state_dict(torch.load(os.path.join(args.load_dir, 'model.pth')))
+        optim.load_state_dict(torch.load(os.path.join(args.load_dir, 'optim.pth')))
+        print('Successfully loaded model')
+    except Exception as e:
         pdb.set_trace()
+        print('Could not restore session properly')
 
-        replicas = nn.parallel.replicate(self.module, self.device_ids)
-        inputs = nn.parallel.scatter(input, self.device_ids)
-        replicas = replicas[:len(inputs)]
-        outputs = nn.parallel.parallel_apply(replicas, inputs)
-        return nn.parallel.gather(outputs, self.output_device)
-        
+    return model, optim
+
 
 # ------------------------------------------------------------------------------
 # Distributions

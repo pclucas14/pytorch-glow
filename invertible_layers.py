@@ -145,7 +145,7 @@ class Squeeze(Layer):
         x = x.view(bs, c // self.factor ** 2, self.factor, self.factor, h, w)
         x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
         x = x.view(bs, c // self.factor ** 2, h * self.factor, w * self.factor)
-
+        return x
         '''
         # done as in GLOW repository
         x = x.transpose(3, 1).contiguous()
@@ -223,7 +223,8 @@ class GaussianPrior(Layer):
 
     def reverse_(self, x, objective):
         assert x is None
-        mean_and_logsd = torch.cat([torch.zeros_like(x) for _ in range(2)], dim=1)
+        bs, c, h, w = self.input_shape
+        mean_and_logsd = torch.cuda.FloatTensor(bs, 2 * c, h, w).fill_(0.)
         
         if self.conv: 
             mean_and_logsd = self.conv(mean_and_logsd)
