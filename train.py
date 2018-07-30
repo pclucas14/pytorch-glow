@@ -15,6 +15,7 @@ from utils import *
 
 # ------------------------------------------------------------------------------
 parser = argparse.ArgumentParser()
+# training
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--depth', type=int, default=10) 
 parser.add_argument('--n_levels', type=int, default=3) 
@@ -24,13 +25,15 @@ parser.add_argument('--coupling', type=str, default='affine')
 parser.add_argument('--n_bits_x', type=int, default=8)
 parser.add_argument('--n_epochs', type=int, default=2000)
 parser.add_argument('--learntop', action='store_true')
+parser.add_argument('--n_warmup', type=int, default=20, help='number of warmup epochs')
+parser.add_argument('--lr', type=float, default=1e-3)
+# logging
 parser.add_argument('--print_every', type=int, default=500, help='print NLL every _ minibatches')
 parser.add_argument('--test_every', type=int, default=5, help='test on valid every _ epochs')
-parser.add_argument('--save_every', type=int, default=1, help='save model every _ epochs')
+parser.add_argument('--save_every', type=int, default=5, help='save model every _ epochs')
 parser.add_argument('--data_dir', type=str, default='../pixelcnn-pp')
 parser.add_argument('--save_dir', type=str, default='exps', help='directory for log / saving')
 parser.add_argument('--load_dir', type=str, default=None, help='directory from which to load existing model')
-
 args = parser.parse_args()
 args.n_bins = 2 ** args.n_bits_x
 
@@ -72,18 +75,19 @@ with torch.no_grad():
 
 # once init is done, we leverage Data Parallel
 model = nn.DataParallel(model).cuda()
+start_epoch = 0
 
 # load trained model if necessary (must be done after DataParallel)
 if args.load_dir is not None: 
-    model, optim = load_session(model, optim, args)
+    model, optim, start_epoch = load_session(model, optim, args)
 
 # training loop
 # ------------------------------------------------------------------------------
-for epoch in range(args.n_epochs):
+for epoch in range(start_epoch, args.n_epochs):
     print('epoch %s' % epoch)
-    scheduler.step(epoch)
     model.train()
     avg_train_bits_x = 0.
+    num_batches = len(train_loader)
     for i, (img, label) in enumerate(train_loader):
         t = time.time()
         img = img.cuda() 
@@ -106,6 +110,10 @@ for epoch in range(args.n_epochs):
         torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
         optim.step()
         avg_train_bits_x += nobj.item()
+
+        # update learning rate
+        new_lr = float(args.lr * min(1., (i + epoch * num_batches) / (args.n_warmup * num_batches)))
+        for pg in optim.param_groups: pg['lr'] = new_lr
 
         if (i + 1) % args.print_every == 0: 
             print('avg train bits per pixel {:.4f}'.format(avg_train_bits_x / args.print_every))
