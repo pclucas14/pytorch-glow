@@ -127,33 +127,22 @@ class Squeeze(Layer):
         bs, c, h, w = x.size()
         assert h % self.factor == 0 and w % self.factor == 0, pdb.set_trace()
         
-        # done as in GLOW repository
+        # taken from https://github.com/chaiyujin/glow-pytorch/blob/master/glow/modules.py
         x = x.view(bs, c, h // self.factor, self.factor, w // self.factor, self.factor)
         x = x.permute(0, 1, 3, 5, 2, 4).contiguous()
         x = x.view(bs, c * self.factor * self.factor, h // self.factor, w // self.factor)
 
-        #x = x.transpose(3, 1).contiguous()
-        #x = x.reshape(-1, h // self.factor, self.factor, w // self.factor, self.factor, c)
-        #x = x.permute(0, 1, 3, 5, 2, 4)
-        #x = x.reshape(-1, h // self.factor, w // self.factor, c * self.factor ** 2)
-        return x#.transpose(3, 1).contiguous()
+        return x
  
     def unsqueeze_bchw(self, x):
         bs, c, h, w = x.size()
         assert c >= 4 and c % 4 == 0
 
+        # taken from https://github.com/chaiyujin/glow-pytorch/blob/master/glow/modules.py
         x = x.view(bs, c // self.factor ** 2, self.factor, self.factor, h, w)
         x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
         x = x.view(bs, c // self.factor ** 2, h * self.factor, w * self.factor)
         return x
-        '''
-        # done as in GLOW repository
-        x = x.transpose(3, 1).contiguous()
-        x = x.reshape(-1, h, w, int(c / self.factor ** 2), self.factor, self.factor)
-        x = x.permute(0, 1, 4, 2, 5, 3)
-        x = x.reshape(-1, int(h * self.factor), int(w * self.factor), int(c / self.factor ** 2))
-        return x.transpose(3, 1).contiguous()
-        '''
     
     def forward_(self, x, objective):
         if len(x.size()) != 4: 
