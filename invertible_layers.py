@@ -298,11 +298,9 @@ class ActNorm(Layer):
 
             # Compute the mean and variance
             sum_size = input.size(0) * input.size(-1)
-            input_sum = input.sum(dim=0).sum(dim=-1)
-            b = input_sum / sum_size * -1.
-            vars = ((input - unsqueeze(b)) ** 2).sum(dim=0).sum(dim=1) / sum_size
-            vars = unsqueeze(vars)
-            logs = torch.log(self.scale / torch.sqrt(vars) + 1e-6) / self.logscale_factor
+            b = -torch.sum(input, dim=(0, -1)) / sum_size
+            vars = unsqueeze(torch.sum((input + unsqueeze(b)) ** 2, dim=(0, -1))/sum_size)
+            logs = torch.log(self.scale / (torch.sqrt(vars) + 1e-6)) / self.logscale_factor
           
             self.b.data.copy_(unsqueeze(b).data)
             self.logs.data.copy_(logs.data)
