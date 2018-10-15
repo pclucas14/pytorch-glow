@@ -33,7 +33,7 @@ def save_session(model, optim, args, epoch):
 
 def load_session(model, optim, args):
     try: 
-        start_epoch = int(args.load_dir.split('/')[-1])
+        start_epoch = int(args.load_dir.split('/')[-1])+1
         model.load_state_dict(torch.load(os.path.join(args.load_dir, 'model.pth')))
         optim.load_state_dict(torch.load(os.path.join(args.load_dir, 'optim.pth')))
         print('Successfully loaded model')
