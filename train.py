@@ -27,6 +27,7 @@ parser.add_argument('--n_epochs', type=int, default=2000)
 parser.add_argument('--learntop', action='store_true')
 parser.add_argument('--n_warmup', type=int, default=20, help='number of warmup epochs')
 parser.add_argument('--lr', type=float, default=1e-3)
+parser.add_argument('--data_parallel', type=float, action='store_true')
 # logging
 parser.add_argument('--print_every', type=int, default=500, help='print NLL every _ minibatches')
 parser.add_argument('--test_every', type=int, default=5, help='test on valid every _ epochs')
@@ -74,7 +75,8 @@ with torch.no_grad():
         break
 
 # once init is done, we leverage Data Parallel
-model = nn.DataParallel(model).cuda()
+if args.data_parallel:
+  model = nn.DataParallel(model).cuda()
 start_epoch = 0
 
 # load trained model if necessary (must be done after DataParallel)
