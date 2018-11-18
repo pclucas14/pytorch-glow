@@ -17,10 +17,10 @@ from utils import *
 parser = argparse.ArgumentParser()
 # training
 parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--depth', type=int, default=10) 
+parser.add_argument('--depth', type=int, default=32) 
 parser.add_argument('--n_levels', type=int, default=3) 
 parser.add_argument('--norm', type=str, default='actnorm')
-parser.add_argument('--permutation', type=str, default='shuffle')
+parser.add_argument('--permutation', type=str, default='conv')
 parser.add_argument('--coupling', type=str, default='affine')
 parser.add_argument('--n_bits_x', type=int, default=8)
 parser.add_argument('--n_epochs', type=int, default=2000)
@@ -50,7 +50,7 @@ train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train
     download=True, transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=10, drop_last=True)
 
 test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
-    transform=tf), batch_size=args.batch_size, shuffle=False, num_workers=10)
+    transform=tf), batch_size=args.batch_size, shuffle=False, num_workers=10, drop_last=True)
 
 # construct model and ship to GPU
 model = Glow_((args.batch_size, 3, 32, 32), args).cuda()
@@ -89,10 +89,12 @@ for epoch in range(start_epoch, args.n_epochs):
     avg_train_bits_x = 0.
     num_batches = len(train_loader)
     for i, (img, label) in enumerate(train_loader):
+        # if i > 10 : break
+        
         t = time.time()
         img = img.cuda() 
         objective = torch.zeros_like(img[:, 0, 0, 0])
-       
+
         # discretizing cost 
         objective += float(-np.log(args.n_bins) * np.prod(img.shape[1:]))
         
@@ -131,6 +133,7 @@ for epoch in range(start_epoch, args.n_epochs):
         avg_test_bits_x = 0.
         with torch.no_grad():
             for i, (img, label) in enumerate(test_loader): 
+                # if i > 10 : break
                 img = img.cuda() 
                 objective = torch.zeros_like(img[:, 0, 0, 0])
                
@@ -139,6 +142,7 @@ for epoch in range(start_epoch, args.n_epochs):
                 
                 # log_det_jacobian cost (and some prior from Split OP)
                 z, objective = model(img, objective)
+                last_img = img
 
                 nll = (-objective) / float(np.log(2.) * np.prod(img.shape[1:]))
                 
@@ -148,10 +152,19 @@ for epoch in range(start_epoch, args.n_epochs):
 
             print('avg test bits per pixel {:.4f}'.format(avg_test_bits_x.item() / i))
 
-        sample = model.module.sample()
-        grid = utils.make_grid(sample)
-        utils.save_image(grid, '../glow/samples/cifar_Test_{}.png'.format(epoch))
-    
+            sample = model.module.sample()
+            grid = utils.make_grid(sample)
+            utils.save_image(grid, '../glow/samples/cifar_Test_{}.png'.format(epoch))
+
+            # reconstruct
+            x_hat = model.module.reverse_(z, objective)[0]
+            grid = utils.make_grid(x_hat)
+            utils.save_image(grid, '../glow/samples/cifar_Test_Recon{}.png'.format(epoch))
+        
+            grid = utils.make_grid(last_img)
+            utils.save_image(grid, '../glow/samples/cifar_Test_Target.png')
+
+
     if (epoch + 1) % args.save_every == 0: 
         save_session(model, optim, args, epoch)
 

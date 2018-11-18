@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.weight_norm as wn
-from torch.nn.modules.batchnorm import _BatchNorm
 
 import numpy as np
 import pdb
@@ -90,7 +89,6 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         # initialization done with rotation matrix
         w_init = np.linalg.qr(np.random.randn(self.num_channels, self.num_channels))[0]
         w_init = torch.from_numpy(w_init.astype('float32'))
-        # w_init = w_init.cuda()
         w_init = w_init.unsqueeze(-1).unsqueeze(-1)
         self.weight.data.copy_(w_init)
 
@@ -99,7 +97,7 @@ class Invertible1x1Conv(Layer, nn.Conv2d):
         objective += dlogdet
         output = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, \
             self.dilation, self.groups)
-
+ 
         return output, objective
 
     def reverse_(self, x, objective):
@@ -177,14 +175,15 @@ class Split(Layer):
         bs, c, h, w = x.size()
         z1, z2 = torch.chunk(x, 2, dim=1)
         pz = self.split2d_prior(z1)
+        self.sample = z2
         objective += pz.logp(z2) 
         return z1, objective
 
-    def reverse_(self, x, objective):
+    def reverse_(self, x, objective, use_stored_sample=False):
         pz = self.split2d_prior(x)
-        z2 = pz.sample()
+        z2 = self.sample if use_stored_sample else pz.sample() 
         z = torch.cat([x, z2], dim=1)
-        # objective -= pz.logp(z2) 
+        objective -= pz.logp(z2) 
         return z, objective
 
 # Gaussian Prior that's compatible with the Layer framework
@@ -208,10 +207,10 @@ class GaussianPrior(Layer):
         pz = gaussian_diag(mean, logsd)
         objective += pz.logp(x) 
 
-        return None, objective
+        # this way, you can encode and decode back the same image. 
+        return x, objective
 
     def reverse_(self, x, objective):
-        assert x is None
         bs, c, h, w = self.input_shape
         mean_and_logsd = torch.cuda.FloatTensor(bs, 2 * c, h, w).fill_(0.)
         
@@ -220,8 +219,11 @@ class GaussianPrior(Layer):
 
         mean, logsd = torch.chunk(mean_and_logsd, 2, dim=1)
         pz = gaussian_diag(mean, logsd)
+        z = pz.sample() if x is None else x
+        objective -= pz.logp(z)
 
-        return pz.sample(), objective
+        # this way, you can encode and decode back the same image. 
+        return z, objective
          
 
 # ------------------------------------------------------------------------------
