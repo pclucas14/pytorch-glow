@@ -16,8 +16,8 @@ from utils import *
 # ------------------------------------------------------------------------------
 parser = argparse.ArgumentParser()
 # training
-parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--depth', type=int, default=32) 
+parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--depth', type=int, default=6) 
 parser.add_argument('--n_levels', type=int, default=3) 
 parser.add_argument('--norm', type=str, default='actnorm')
 parser.add_argument('--permutation', type=str, default='conv')
@@ -25,11 +25,11 @@ parser.add_argument('--coupling', type=str, default='affine')
 parser.add_argument('--n_bits_x', type=int, default=8)
 parser.add_argument('--n_epochs', type=int, default=2000)
 parser.add_argument('--learntop', action='store_true')
-parser.add_argument('--n_warmup', type=int, default=20, help='number of warmup epochs')
+parser.add_argument('--n_warmup', type=int, default=50, help='number of warmup epochs')
 parser.add_argument('--lr', type=float, default=1e-3)
 # logging
-parser.add_argument('--print_every', type=int, default=500, help='print NLL every _ minibatches')
-parser.add_argument('--test_every', type=int, default=5, help='test on valid every _ epochs')
+parser.add_argument('--print_every', type=int, default=100, help='print NLL every _ minibatches')
+parser.add_argument('--test_every', type=int, default=1, help='test on valid every _ epochs')
 parser.add_argument('--save_every', type=int, default=5, help='save model every _ epochs')
 parser.add_argument('--data_dir', type=str, default='../pixelcnn-pp')
 parser.add_argument('--save_dir', type=str, default='exps', help='directory for log / saving')
@@ -43,17 +43,22 @@ torch.manual_seed(0)
 torch.cuda.manual_seed_all(0)
 
 # loading / dataset preprocessing
-tf = transforms.Compose([transforms.ToTensor(), 
+tf = transforms.Compose([transforms.ToTensor(), lambda x : torch.cat([x, x, x], dim=0),  
                          lambda x: x + torch.zeros_like(x).uniform_(0., 1./args.n_bins)])
 
-train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
-    download=True, transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=10, drop_last=True)
+#train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
+#    download=True, transform=tf), batch_size=args.batch_size, shuffle=True, num_workers=10, drop_last=True)
 
-test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
-    transform=tf), batch_size=args.batch_size, shuffle=False, num_workers=10, drop_last=True)
+#test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
+#    transform=tf), batch_size=args.batch_size, shuffle=False, num_workers=10, drop_last=True)
+
+train_loader = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=True, download=True, transform=tf),
+                     batch_size=args.batch_size, shuffle=True, num_workers=1, pin_memory=True)
+test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, download=True, transform=tf),
+                     batch_size=args.batch_size, shuffle=False, num_workers=1, pin_memory=True)
 
 # construct model and ship to GPU
-model = Glow_((args.batch_size, 3, 32, 32), args).cuda()
+model = Glow_((args.batch_size, 3, 28, 28), args).cuda()
 print(model)
 print("number of model parameters:", sum([np.prod(p.size()) for p in model.parameters()]))
 
@@ -62,8 +67,8 @@ optim = optim.Adam(model.parameters(), lr=1e-3)
 scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=45, gamma=0.1)
 
 # data dependant init
-init_loader = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
-    download=True, transform=tf), batch_size=512, shuffle=True, num_workers=1)
+init_loader = train_loader #torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=True, 
+    #download=True, transform=tf), batch_size=512, shuffle=True, num_workers=1)
 
 with torch.no_grad():
     model.eval()
@@ -89,8 +94,8 @@ for epoch in range(start_epoch, args.n_epochs):
     avg_train_bits_x = 0.
     num_batches = len(train_loader)
     for i, (img, label) in enumerate(train_loader):
-        # if i > 10 : break
-        
+        if i > 10 : break
+
         t = time.time()
         img = img.cuda() 
         objective = torch.zeros_like(img[:, 0, 0, 0])
@@ -133,7 +138,7 @@ for epoch in range(start_epoch, args.n_epochs):
         avg_test_bits_x = 0.
         with torch.no_grad():
             for i, (img, label) in enumerate(test_loader): 
-                # if i > 10 : break
+                if i > 10 : break
                 img = img.cuda() 
                 objective = torch.zeros_like(img[:, 0, 0, 0])
                

@@ -374,10 +374,11 @@ class Glow_(LayerList, nn.Module):
         _, C, H, W = input_shape
         
         for i in range(args.n_levels):
-            # Squeeze Layer 
-            layers += [Squeeze(input_shape)]
-            C, H, W = C * 4, H // 2, W // 2
-            output_shapes += [(-1, C, H, W)]
+            # Squeeze Layer
+            if i < args.n_levels - 1: 
+                layers += [Squeeze(input_shape)]
+                C, H, W = C * 4, H // 2, W // 2
+                output_shapes += [(-1, C, H, W)]
             
             # RevNet Block
             layers += [RevNetStep(C, args) for _ in range(args.depth)]
@@ -388,6 +389,8 @@ class Glow_(LayerList, nn.Module):
                 layers += [Split(output_shapes[-1])]
                 C = C // 2
                 output_shapes += [(-1, C, H, W)]
+            
+            print(output_shapes[-1])
 
         layers += [GaussianPrior((args.batch_size, C, H, W), args)]
         output_shapes += [output_shapes[-1]]
