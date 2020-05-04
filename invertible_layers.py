@@ -234,8 +234,8 @@ class GaussianPrior(Layer):
 class AdditiveCoupling(Layer):
     def __init__(self, num_features):
         super(AdditiveCoupling, self).__init__()
-        assert num_features % 2 == 0
-        self.NN = NN(num_features // 2)
+        # assert num_features % 2 == 0
+        self.NN = NN(math.ceil(num_features / 2), channels_out=math.floor(num_features / 2) * 2)
 
     def forward_(self, x, objective):
         z1, z2 = torch.chunk(x, 2, dim=1)
@@ -252,7 +252,7 @@ class AffineCoupling(Layer):
     def __init__(self, num_features):
         super(AffineCoupling, self).__init__()
         # assert num_features % 2 == 0
-        self.NN = NN(num_features // 2, channels_out=num_features)
+        self.NN = NN(math.ceil(num_features/2), channels_out=math.floor(num_features/2)*2)
 
     def forward_(self, x, objective):
         z1, z2 = torch.chunk(x, 2, dim=1)
