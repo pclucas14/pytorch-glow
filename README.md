@@ -15,5 +15,4 @@ CUDA_VISIBLE_DEVICES=0 python train.py --depth 10 --coupling affine --batch_size
 - [ ] LU-decomposed invertible convolution. 
 
 ### Contact
-For questions / comments / requests, feel free to send me an email.\
-Happy generative modelling :)
+This repository is no longer maintained. Feel free to file an issue if need be, however response may be slow. 
